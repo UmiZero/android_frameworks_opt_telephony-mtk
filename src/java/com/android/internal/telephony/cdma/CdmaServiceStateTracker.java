@@ -54,6 +54,7 @@ import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.CommandsInterface.RadioState;
 import com.android.internal.telephony.EventLogTags;
 import com.android.internal.telephony.ICarrierConfigLoader;
+import com.android.internal.telephony.IccCardConstants;
 import com.android.internal.telephony.MccTable;
 import com.android.internal.telephony.Phone;
 import com.android.internal.telephony.PhoneConstants;
@@ -102,6 +103,8 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
     private static final int NITZ_UPDATE_DIFF_DEFAULT = 2000;
     private int mNitzUpdateDiff = SystemProperties.getInt("ro.nitz_update_diff",
             NITZ_UPDATE_DIFF_DEFAULT);
+    /** Time stamp after 19 January 2038 is not supported under 32 bit */
+    private static final int MAX_NITZ_YEAR = 2037;
 
     private int mRoamingIndicator;
     private boolean mIsInPrl;
@@ -323,6 +326,7 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
 
         case EVENT_NV_READY:
             updatePhoneObject();
+            updateCarrierConfig();
 
             // Only support automatic selection mode in CDMA.
             mCi.getNetworkSelectionMode(obtainMessage(EVENT_POLL_STATE_NETWORK_SELECTION_MODE));
@@ -1639,6 +1643,10 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
             String[] nitzSubs = nitz.split("[/:,+-]");
 
             int year = 2000 + Integer.parseInt(nitzSubs[0]);
+            if (year > MAX_NITZ_YEAR) {
+              if (DBG) loge("NITZ year: " + year + " exceeds limit, skip NITZ time update");
+              return;
+            }
             c.set(Calendar.YEAR, year);
 
             // month is 0 based!
@@ -2103,6 +2111,10 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
         Rlog.e(LOG_TAG, "[CdmaSST] " + s);
     }
 
+    protected void loge(String s, Throwable t) {
+        Rlog.e(LOG_TAG, "[CdmaSST] " + s, t);
+    }
+
     @Override
     public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
         pw.println("CdmaServiceStateTracker extends:");
@@ -2162,4 +2174,23 @@ public class CdmaServiceStateTracker extends ServiceStateTracker {
         }
         mImsRegistrationOnOff = registered;
     }
+
+    private void updateCarrierConfig(){
+        ICarrierConfigLoader configLoader =
+                (ICarrierConfigLoader) ServiceManager.getService(Context.CARRIER_CONFIG_SERVICE);
+
+        if (configLoader != null) {
+            try {
+                int phoneId = PhoneFactory.getDefaultPhone().getPhoneId();
+                configLoader.updateConfigForPhoneId(phoneId,
+                    IccCardConstants.INTENT_VALUE_ICC_LOADED);
+                log("updateCarrierConfig: CarrierConfig Updated for Phone ID " + phoneId);
+            } catch (Exception e) {
+                loge("updateCarrierConfig: An Error Occurred While Updating the CarrierConfig!", e);
+            }
+        } else {
+            log("updateCarrierConfig: no carrier config service available");
+        }
+    }
+
 }
